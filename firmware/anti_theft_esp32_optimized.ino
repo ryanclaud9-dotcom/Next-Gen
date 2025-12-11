@@ -15,6 +15,8 @@
 void processSMSCommand(String body, String sender);
 void syncTimeWithNTP();
 unsigned long getCurrentUnixTime();
+void sendSMS(String message, String phoneNumber);
+void sendSMS(String message);
 
 // Hardware Serial
 HardwareSerial gpsSerial(1);
@@ -106,6 +108,23 @@ void setup() {
   Serial.println("✅ System Ready - Send '1234 STATUS' via SMS to test");
 }
 
+// ===== SMS FUNCTIONS (must be before loop) =====
+void sendSMS(String message, String phoneNumber) {
+  if (!gsmHealthy) return;
+  
+  gsmSerial.print("AT+CMGS=\"" + phoneNumber + "\"\r\n");
+  delay(2000);
+  gsmSerial.print(message);
+  delay(500);
+  gsmSerial.write(26);
+  delay(2000);
+}
+
+// Overloaded version with default phone number
+void sendSMS(String message) {
+  sendSMS(message, AUTHORIZED_NUMBER_1);
+}
+
 void loop() {
   esp_task_wdt_reset();
   
@@ -139,7 +158,7 @@ void loop() {
         wifiLossProtectionTriggered = true;
         
         if (gsmHealthy) {
-          sendSMS("SECURITY: WiFi lost for " + String(WIFI_LOSS_TIMEOUT/1000) + "s. Engine stopped. Send '1234 START' to restart.");
+          sendSMS("SECURITY: WiFi lost for " + String(WIFI_LOSS_TIMEOUT/1000) + "s. Engine stopped. Send '1234 START' to restart.", AUTHORIZED_NUMBER_1);
         }
       }
     }
@@ -185,7 +204,7 @@ void loop() {
       noTone(BUZZER_PIN);
       
       if (gsmHealthy && millis() - lastSMSSent > 120000) {
-        sendSMS("ALERT: Movement detected!");
+        sendSMS("ALERT: Movement detected!", AUTHORIZED_NUMBER_1);
         lastSMSSent = millis();
       }
     }
@@ -420,16 +439,7 @@ void processSMSCommand(String body, String sender) {
   }
 }
 
-void sendSMS(String message, String phoneNumber = AUTHORIZED_NUMBER_1) {
-  if (!gsmHealthy) return;
-  
-  gsmSerial.print("AT+CMGS=\"" + phoneNumber + "\"\r\n");
-  delay(2000);
-  gsmSerial.print(message);
-  delay(500);
-  gsmSerial.write(26);
-  delay(2000);
-}
+
 
 void syncTimeWithNTP() {
   configTime(8 * 3600, 0, "pool.ntp.org");
