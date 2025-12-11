@@ -1,0 +1,79 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ============================================
+// SECURITY WARNING
+// ============================================
+// This file contains sensitive credentials!
+// 1. NEVER commit this file to public repositories
+// 2. Add "config.h" to your .gitignore
+// 3. Use strong passwords (8+ characters, mixed case, numbers, symbols)
+// 4. Change default passwords immediately
+// ============================================
+
+// WiFi Configuration
+#define WIFI_SSID "YourWiFiName"          // Replace with your WiFi name
+#define WIFI_PASSWORD "YourStrongPass123" // Replace with your WiFi password
+
+// Firebase Configuration
+#define FIREBASE_API_KEY "your-firebase-api-key-here"
+#define FIREBASE_DATABASE_URL "your-project.firebaseio.com"
+#define FIREBASE_USER_EMAIL "device@your-project.com"
+#define FIREBASE_USER_PASSWORD "YourFirebasePass#2024"  // Strong password!
+
+// Device Configuration
+#define DEVICE_ID "vehicle_001"
+
+// Pin Definitions (ESP32)
+#define GPS_RX 16
+#define GPS_TX 17
+#define GSM_RX 25
+#define GSM_TX 26
+
+// Engine Control Relays
+#define RELAY_PIN 12              // Starter motor relay
+#define IGNITION_RELAY_PIN 13     // Ignition coil relay
+
+// Sensors and Indicators
+#define VIBRATION_PIN 14
+#define BUZZER_PIN 15
+#define LIGHT_INDICATOR_PIN 2
+
+// Optional: Emergency Bypass Switch (RECOMMENDED)
+// Connect a hidden switch between this pin and GND
+// When activated, disables all security features
+#define EMERGENCY_BYPASS_PIN 33
+#define ENABLE_EMERGENCY_BYPASS true
+
+// Optional: Engine Running Detection (RECOMMENDED)
+// Connect to alternator voltage through voltage divider
+// Helps verify engine actually started
+#define ALTERNATOR_SENSE_PIN 34
+#define ENABLE_ENGINE_DETECTION false  // Set true when hardware added
+
+// Authorized Phone Numbers
+// Format: "+[country code][number]" (no spaces)
+#define AUTHORIZED_NUMBER_1 "+639675715673"
+#define AUTHORIZED_NUMBER_2 "+639542583234"
+
+// SMS Password
+// ⚠️ CRITICAL: Change this immediately!
+// Requirements:
+// - Minimum 8 characters
+// - Mix of uppercase, lowercase, numbers, symbols
+// - NOT a dictionary word
+// - NOT "1234" or similar simple patterns
+#define SMS_PASSWORD "Veh1cle#2024"  // CHANGE THIS!
+
+// Power Management (Optional)
+#define ENABLE_DEEP_SLEEP false       // Enable sleep mode when idle
+#define IDLE_SLEEP_TIMEOUT 300000     // 5 minutes idle before sleep
+
+// Security Settings
+#define ENABLE_COMMAND_TIMEOUT true   // Expire commands after 60 seconds
+#define COMMAND_TIMEOUT 60000         // 60 seconds
+
+// Geofence Settings
+#define GEOFENCE_HYSTERESIS 20.0      // 20 meter buffer zone
+
+#endif

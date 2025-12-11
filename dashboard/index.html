@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Monitor - Anti-Theft System</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+    <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+    <!-- Login Container -->
+    <div id="login-container" class="login-container">
+        <div class="login-box">
+            <h1>🚗 Vehicle Monitor</h1>
+            
+            <div id="login-form">
+                <input type="email" id="login-email" placeholder="Email" />
+                <input type="password" id="login-password" placeholder="Password" />
+                <button onclick="login()">Login</button>
+                <p id="login-error" class="error" style="display: none;"></p>
+                <p class="toggle-form">Don't have an account? <a href="#" onclick="showRegister(); return false;">Register</a></p>
+            </div>
+            
+            <div id="register-form" style="display: none;">
+                <input type="email" id="register-email" placeholder="Email" />
+                <input type="password" id="register-password" placeholder="Password (min 6 characters)" />
+                <input type="password" id="register-confirm" placeholder="Confirm Password" />
+                <button onclick="register()">Register</button>
+                <p id="register-error" class="error" style="display: none;"></p>
+                <p class="toggle-form">Already have an account? <a href="#" onclick="showLogin(); return false;">Login</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Container -->
+    <div id="dashboard-container" class="dashboard-layout" style="display: none;">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M5 17H4a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2h-1"></path>
+                    <polygon points="12 15 17 21 7 21 12 15"></polygon>
+                </svg>
+                <h2>Vehicle Monitor</h2>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <button class="nav-item active" onclick="switchTab('overview')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="14" width="7" height="7"></rect>
+                        <rect x="3" y="14" width="7" height="7"></rect>
+                    </svg>
+                    <span>Overview</span>
+                </button>
+                
+                <button class="nav-item" onclick="switchTab('map')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+                        <line x1="8" y1="2" x2="8" y2="18"></line>
+                        <line x1="16" y1="6" x2="16" y2="22"></line>
+                    </svg>
+                    <span>Map</span>
+                </button>
+                
+                <button class="nav-item" onclick="switchTab('control')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M12 1v6m0 6v6m5.2-13.2l-4.2 4.2m0 6l4.2 4.2M23 12h-6m-6 0H1m18.2 5.2l-4.2-4.2m0-6l4.2-4.2"></path>
+                    </svg>
+                    <span>Control</span>
+                </button>
+                
+                <button class="nav-item" onclick="switchTab('history')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <span>History</span>
+                </button>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="user-profile">
+                    <div class="user-avatar">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="12" cy="7" r="4"></circle>
+                        </svg>
+                    </div>
+                    <div class="user-details">
+                        <span id="user-email-sidebar" class="user-name"></span>
+                        <span class="user-role">Administrator</span>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Overview Tab -->
+            <div id="tab-overview" class="tab-content active">
+                <div class="content-header">
+                    <h1>Vehicle Control</h1>
+                    <div class="header-actions">
+                        <div class="quick-controls">
+                            <button class="quick-btn btn-success" onclick="confirmCommand('START', 'Start Engine')" title="Start Engine">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                </svg>
+                                <span class="btn-label">Start</span>
+                            </button>
+                            <button class="quick-btn btn-danger" onclick="confirmCommand('STOP', 'Stop Engine')" title="Stop Engine">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="6" y="6" width="12" height="12"></rect>
+                                </svg>
+                                <span class="btn-label">Stop</span>
+                            </button>
+                            <button class="quick-btn btn-warning" onclick="toggleArm()" title="Arm/Disarm System">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                </svg>
+                                <span class="btn-label" id="arm-label">Arm</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid">
+                    <!-- System Status -->
+                    <div class="card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            System Status
+                        </h3>
+                        <div class="status-badge offline" id="system-status">Offline</div>
+                        <div class="status-info">
+                            <p><strong>Engine:</strong> <span id="engine-status">Stopped</span></p>
+                            <p><strong>System:</strong> <span id="armed-status">Disarmed</span></p>
+                            <p><strong>Last Update:</strong> <span id="last-update">-</span></p>
+                            <p><strong>Uptime:</strong> <span id="uptime">-</span></p>
+                        </div>
+                    </div>
+
+
+
+                    <!-- Speed Monitor -->
+                    <div class="card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"></path>
+                            </svg>
+                            Live Speed
+                        </h3>
+                        <div class="speed-gauge">
+                            <span id="current-speed" class="speed-value">0</span>
+                            <span class="speed-unit">km/h</span>
+                            <div style="font-size: 12px; margin-top: 8px; opacity: 0.9;">
+                                <span id="satellites-mini">0</span> satellites
+                            </div>
+                        </div>
+                        <div class="speed-settings">
+                            <label>Speed Limit:</label>
+                            <input type="number" id="speed-limit" value="80" min="0" max="200" />
+                            <button class="btn btn-primary btn-sm" onclick="setSpeedLimit()">Set</button>
+                        </div>
+                    </div>
+
+                    <!-- Trip Statistics -->
+                    <div class="card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                            </svg>
+                            Trip Statistics
+                        </h3>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">Today's Distance</span>
+                                <span class="stat-value" id="distance-today">0 km</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Max Speed</span>
+                                <span class="stat-value" id="max-speed">0 km/h</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Location Info -->
+                    <div class="card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                <circle cx="12" cy="10" r="3"></circle>
+                            </svg>
+                            Current Location
+                        </h3>
+                        <div class="location-info">
+                            <div class="location-item">
+                                <span class="location-label">Coordinates</span>
+                                <span class="location-value">
+                                    <span id="latitude">-</span>, <span id="longitude">-</span>
+                                </span>
+                            </div>
+                            <div class="location-item">
+                                <span class="location-label">Geofence Status</span>
+                                <span class="location-value" id="geofence-status">Not Configured</span>
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="setupGeofence()" style="width: 100%; margin-top: 8px;">
+                                Configure Geofence
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Map Preview -->
+                    <div class="card" style="grid-column: span 2;">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+                            </svg>
+                            Live Location
+                        </h3>
+                        <div class="map-controls">
+                            <button class="btn btn-primary btn-sm" onclick="centerMap()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="8" x2="12" y2="16"></line>
+                                    <line x1="8" y1="12" x2="16" y2="12"></line>
+                                </svg>
+                                Center
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="loadRouteHistory()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                                </svg>
+                                Route
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="exportData()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                Export
+                            </button>
+                        </div>
+                        <div class="map-container">
+                            <div id="map"></div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Events -->
+                    <div class="card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            Recent Events
+                        </h3>
+                        <div class="timeline" id="events-log"></div>
+                    </div>
+
+                    <!-- Notifications -->
+                    <div class="card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                            </svg>
+                            Notifications
+                        </h3>
+                        <div class="timeline" id="notifications-log"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map Tab -->
+            <div id="tab-map" class="tab-content">
+                <div class="content-header">
+                    <h1>Live Location & Tracking</h1>
+                    <div class="header-actions">
+                        <button class="icon-btn" onclick="centerMap()" title="Center Map">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="16"></line>
+                                <line x1="8" y1="12" x2="16" y2="12"></line>
+                            </svg>
+                        </button>
+                        <button class="icon-btn" onclick="loadRouteHistory()" title="Route History">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                            </svg>
+                        </button>
+                        <button class="icon-btn" onclick="exportData()" title="Export Data">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
+                        <div class="location-item">
+                            <span class="location-label">GPS Coordinates</span>
+                            <span class="location-value"><span id="latitude-map">-</span>, <span id="longitude-map">-</span></span>
+                        </div>
+                        <div class="location-item">
+                            <span class="location-label">Current Speed</span>
+                            <span class="location-value"><span id="speed-map">0</span> km/h</span>
+                        </div>
+                        <div class="location-item">
+                            <span class="location-label">Satellites</span>
+                            <span class="location-value"><span id="satellites-map">0</span></span>
+                        </div>
+                        <div class="location-item">
+                            <span class="location-label">Geofence</span>
+                            <span class="location-value" id="geofence-status-map">Not Set</span>
+                        </div>
+                    </div>
+                    <div style="height: calc(100vh - 300px); border-radius: 16px; overflow: hidden;">
+                        <div id="map-full" style="height: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Control Tab -->
+            <div id="tab-control" class="tab-content">
+                <div class="content-header">
+                    <h1>Remote Control</h1>
+                </div>
+                <div class="control-grid">
+                    <div class="card">
+                        <h3>Vehicle Controls</h3>
+                        <div class="control-buttons-grid">
+                            <button class="btn btn-success btn-large" onclick="confirmCommand('START', 'Start Engine')">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                </svg>
+                                <span>Start Engine</span>
+                            </button>
+                            <button class="btn btn-danger btn-large" onclick="confirmCommand('STOP', 'Stop Engine')">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="6" y="6" width="12" height="12"></rect>
+                                </svg>
+                                <span>Stop Engine</span>
+                            </button>
+                            <button class="btn btn-warning btn-large" onclick="sendCommand('ARM')">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                </svg>
+                                <span>Arm System</span>
+                            </button>
+                            <button class="btn btn-info btn-large" onclick="sendCommand('DISARM')">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                                </svg>
+                                <span>Disarm System</span>
+                            </button>
+                            <button class="btn btn-primary btn-large" onclick="sendCommand('LOCATE')">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                    <circle cx="12" cy="10" r="3"></circle>
+                                </svg>
+                                <span>Update Location</span>
+                            </button>
+                            <button class="btn btn-secondary btn-large" onclick="confirmCommand('REBOOT', 'Reboot System')">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                                </svg>
+                                <span>Reboot</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Tab -->
+            <div id="tab-history" class="tab-content">
+                <div class="content-header">
+                    <h1>Activity History</h1>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px;">
+                    <div class="card">
+                        <h3>Recent Events</h3>
+                        <div id="events-log-history" class="timeline"></div>
+                    </div>
+                    <div class="card">
+                        <h3>Notifications</h3>
+                        <div id="notifications-log-history" class="timeline"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    
+    <!-- Leaflet Map -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Firebase Config -->
+    <script src="js/firebase-config.js"></script>
+    
+    <!-- App Logic -->
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// WiFi Configuration
+#define WIFI_SSID "YourWiFiNetworkName"
+#define WIFI_PASSWORD "YourWiFiPassword"
+
+// Firebase Configuration
+#define FIREBASE_API_KEY "your-firebase-api-key-here"
+#define FIREBASE_DATABASE_URL "your-project-id-default-rtdb.firebaseio.com"
+#define FIREBASE_USER_EMAIL "device@yourproject.com"
+#define FIREBASE_USER_PASSWORD "your-device-password"
+
+// Device Configuration
+#define DEVICE_ID "vehicle_001"
+
+// Pin Definitions (ESP32)
+#define GPS_RX 16
+#define GPS_TX 17
+#define GSM_RX 25
+#define GSM_TX 26
+
+// Engine Control Relays
+#define IGNITION_SWITCH_RELAY_PIN 12    // Ignition switch relay (allows starting)
+#define IGNITION_COIL_RELAY_PIN 13      // Ignition coil relay (starts/stops engine)
+
+// Relay Logic Configuration
+// IMPORTANT: Set to true to prevent auto-start issue
+#define IGNITION_SWITCH_INVERTED true   // Use NC contact to prevent auto-start
+#define IGNITION_COIL_INVERTED false    // Keep as false for ignition coil
+
+// Sensors and Indicators
+#define VIBRATION_PIN 14
+#define BUZZER_PIN 15
+#define LIGHT_INDICATOR_PIN 2
+
+// Authorized Numbers (CHANGE THESE TO YOUR PHONE NUMBERS)
+#define AUTHORIZED_NUMBER_1 "+1234567890"
+#define AUTHORIZED_NUMBER_2 "+0987654321"
+
+// SMS Password (CHANGE THIS FROM DEFAULT)
+#define SMS_PASSWORD "1234"
+
+#endif
