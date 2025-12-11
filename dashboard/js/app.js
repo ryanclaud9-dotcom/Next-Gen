@@ -583,7 +583,28 @@ function updateStatus(data) {
     
     document.getElementById('engine-status').textContent = data.engineRunning ? '🟢 Running' : '🔴 Stopped';
     document.getElementById('armed-status').textContent = data.systemArmed ? '🔒 Armed' : '🔓 Disarmed';
-    document.getElementById('last-update').textContent = new Date(data.timestamp).toLocaleString();
+    // Handle timestamp - prefer lastUpdate string, fallback to timestamp conversion
+    let displayTime;
+    if (data.lastUpdate) {
+        displayTime = data.lastUpdate;
+    } else if (data.timestamp) {
+        // Convert timestamp - if it's too small, it's probably Unix seconds, otherwise milliseconds
+        const timestamp = data.timestamp;
+        if (timestamp > 1000000000000) {
+            // Looks like milliseconds
+            displayTime = new Date(timestamp).toLocaleString();
+        } else if (timestamp > 1000000000) {
+            // Looks like Unix seconds
+            displayTime = new Date(timestamp * 1000).toLocaleString();
+        } else {
+            // Fallback to current time
+            displayTime = new Date().toLocaleString();
+        }
+    } else {
+        displayTime = 'Unknown';
+    }
+    
+    document.getElementById('last-update').textContent = displayTime;
     
     // Update arm button label
     const armLabel = document.getElementById('arm-label');
@@ -608,7 +629,7 @@ function updateEventsLog(events) {
         div.innerHTML = `
             <div class="timeline-content">
                 <div class="timeline-title">${event.event}</div>
-                <div class="timeline-time">${new Date(event.timestamp).toLocaleString()}</div>
+                <div class="timeline-time">${formatTimestamp(event.timestamp)}</div>
             </div>
         `;
         logContainer.appendChild(div);
@@ -626,7 +647,7 @@ function updateNotificationsLog(notifications) {
             <div class="timeline-content">
                 <div class="timeline-title">${notif.title}</div>
                 <div style="font-size: 13px; color: var(--text-secondary); margin: 4px 0;">${notif.body}</div>
-                <div class="timeline-time">${new Date(notif.timestamp).toLocaleString()}</div>
+                <div class="timeline-time">${formatTimestamp(notif.timestamp)}</div>
             </div>
         `;
         logContainer.appendChild(div);
@@ -706,10 +727,49 @@ function toggleArm() {
 
 
 
+// Utility function to format timestamps properly
+function formatTimestamp(timestamp) {
+    if (!timestamp) return 'Unknown';
+    
+    // Handle different timestamp formats
+    if (typeof timestamp === 'string') {
+        // Already formatted string
+        return timestamp;
+    }
+    
+    // Convert timestamp - if it's too small, it's probably Unix seconds, otherwise milliseconds
+    if (timestamp > 1000000000000) {
+        // Looks like milliseconds
+        return new Date(timestamp).toLocaleString();
+    } else if (timestamp > 1000000000) {
+        // Looks like Unix seconds
+        return new Date(timestamp * 1000).toLocaleString();
+    } else {
+        // Fallback to current time
+        return new Date().toLocaleString();
+    }
+}
+
 // Geofencing
 function updateGeofenceDisplay(data) {
-    const statusText = data.inside ? `Inside ${data.fence} ✓` : `Outside ${data.fence} (${Math.round(data.distance)}m)`;
-    const statusColor = data.inside ? '#10b981' : '#ef4444';
+    console.log('🔄 updateGeofenceDisplay called with data:', data);
+    
+    // Validate geofence data and provide defaults
+    const fenceName = data.fence || data.name || 'Home Zone';
+    const distance = (data.distance !== undefined && !isNaN(data.distance)) ? Math.round(data.distance) : 0;
+    const inside = data.inside || false;
+    
+    // Create status text with proper validation
+    let statusText;
+    if (inside) {
+        statusText = `Inside ${fenceName} ✓`;
+    } else {
+        statusText = `Outside ${fenceName} (${distance}m)`;
+    }
+    
+    const statusColor = inside ? '#10b981' : '#ef4444';
+    
+    console.log('📍 Geofence status:', statusText);
     
     // Update all geofence status elements
     const statusElements = [

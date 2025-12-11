@@ -25,9 +25,16 @@
 #define IGNITION_COIL_RELAY_PIN 13      // Ignition coil relay (starts/stops engine)
 
 // Relay Logic Configuration
-// IMPORTANT: Set to true to prevent auto-start issue
-#define IGNITION_SWITCH_INVERTED true   // Use NC contact to prevent auto-start
-#define IGNITION_COIL_INVERTED false    // Keep as false for ignition coil
+// IMPORTANT: Adjust these based on your actual relay wiring
+#define IGNITION_SWITCH_INVERTED false  // Set true if using NC contacts
+#define IGNITION_COIL_INVERTED true     // Set true if using NC contacts
+
+// LED Logic Configuration
+#define LED_INVERTED true               // ESP32 built-in LED is inverted (LOW=ON, HIGH=OFF)
+
+// WiFi Loss Protection Configuration
+#define WIFI_LOSS_PROTECTION_ENABLED true    // Enable automatic engine stop on WiFi loss
+#define WIFI_LOSS_TIMEOUT_SECONDS 30         // Seconds without WiFi before auto-stop
 
 // Sensors and Indicators
 #define VIBRATION_PIN 14

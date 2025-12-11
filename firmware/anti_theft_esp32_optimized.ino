@@ -8,7 +8,14 @@
 #include <addons/RTDBHelper.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
+#include <time.h>
+#include <sys/time.h>
 #include "config.h"
+
+// Fallback LED configuration if not defined in config.h
+#ifndef LED_INVERTED
+#define LED_INVERTED true  // ESP32 built-in LED is inverted (LOW=ON, HIGH=OFF)
+#endif
 
 // Function declarations
 void handleStoredSMS(String response);
@@ -17,6 +24,11 @@ void handleImmediateTheftAlert();
 void sendImmediateSMSAlert();
 void sendEngineStatusSMS(String status);
 void performGSMHealthCheck();
+String decodeHexSMS(String hexString);
+void parseSimpleSMS(String response);
+void syncTimeWithNTP();
+String getCurrentTimestamp();
+unsigned long getCurrentUnixTime();
 
 // Watchdog timeout (30 seconds)
 #define WDT_TIMEOUT 30
@@ -69,6 +81,14 @@ unsigned long lastGSMCheck = 0;
 unsigned long lastGSMHealthCheck = 0;
 #define GSM_HEALTH_CHECK_INTERVAL 60000  // Check GSM health every 60 seconds
 bool gsmHealthy = false;
+
+// WiFi Loss Protection
+unsigned long lastWiFiCheck = 0;
+unsigned long wifiLostTime = 0;
+bool wifiWasConnected = false;
+bool wifiLossProtectionTriggered = false;
+#define WIFI_CHECK_INTERVAL 5000        // Check WiFi every 5 seconds
+#define WIFI_LOSS_TIMEOUT (WIFI_LOSS_TIMEOUT_SECONDS * 1000)  // Convert to milliseconds
 
 // Monitoring
 unsigned long lastMonitorPrint = 0;
@@ -169,7 +189,7 @@ void setup() {
   setIgnitionSwitchRelay(false);  // Ignition switch OFF
   setIgnitionCoilRelay(false);    // Ignition coil OFF (CRITICAL - prevents physical starting)
   digitalWrite(BUZZER_PIN, LOW);
-  digitalWrite(LIGHT_INDICATOR_PIN, LOW);
+  setLED(false);  // LED OFF initially
   
   // Restore engine state from persistent storage
   engineRunning = prefs.getBool("engineRun", false);
@@ -180,15 +200,15 @@ void setup() {
     Serial.println("⚠️ Restoring engine state: RUNNING (system disarmed)");
     setIgnitionSwitchRelay(true);   // Enable ignition switch
     setIgnitionCoilRelay(true);     // Enable ignition coil
-    digitalWrite(LIGHT_INDICATOR_PIN, HIGH);  // LED ON when engine running
+    setLED(true);  // LED ON when engine running
   } else if (engineRunning && systemArmed) {
     Serial.println("🔒 Engine was running but ANTI-THEFT is ACTIVE - ignition coil disabled");
     Serial.println("🔒 Send '1234 START' to enable ignition coil");
     engineRunning = false;  // Force engine state to stopped for safety
     prefs.putBool("engineRun", false);  // Update persistent storage
-    digitalWrite(LIGHT_INDICATOR_PIN, LOW);   // LED OFF
+    setLED(false);  // LED OFF
   } else {
-    digitalWrite(LIGHT_INDICATOR_PIN, LOW);   // LED OFF when engine stopped
+    setLED(false);  // LED OFF when engine stopped
     Serial.println("✓ Engine state: STOPPED");
   }
   
@@ -279,28 +299,78 @@ void loop() {
   // Reset watchdog timer (CRITICAL - prevents system hang)
   esp_task_wdt_reset();
   
-  // Check WiFi and switch to GSM if needed
-  if (WiFi.status() != WL_CONNECTED) {
-    if (millis() - reconnectAttempt > 30000) {
-      Serial.println("WiFi lost, attempting reconnect...");
-      connectWiFi();
-      reconnectAttempt = millis();
+  // WiFi Loss Protection - Enhanced Security Feature
+  if (millis() - lastWiFiCheck > WIFI_CHECK_INTERVAL) {
+    bool currentWiFiStatus = (WiFi.status() == WL_CONNECTED);
+    
+    if (currentWiFiStatus) {
+      // WiFi is connected
+      if (!wifiWasConnected) {
+        Serial.println("📶 WiFi connection restored");
+        if (wifiLossProtectionTriggered) {
+          Serial.println("🔓 WiFi restored - Anti-theft protection can be disabled via SMS/Dashboard");
+          wifiLossProtectionTriggered = false;
+        }
+      }
+      wifiWasConnected = true;
+      wifiLostTime = 0;  // Reset WiFi loss timer
       
-      // If WiFi still fails, enable GSM fallback
-      if (WiFi.status() != WL_CONNECTED) {
+      // Disable GSM fallback when WiFi is restored
+      if (useGSMFallback) {
+        Serial.println("WiFi restored, disabling GSM fallback");
+        useGSMFallback = false;
+      }
+      
+    } else {
+      // WiFi is disconnected
+      if (wifiWasConnected) {
+        Serial.println("📶 WiFi connection lost - starting protection timer");
+        wifiLostTime = millis();
+        wifiWasConnected = false;
+        
+        // Attempt reconnection
+        Serial.println("Attempting WiFi reconnection...");
+        connectWiFi();
+      }
+      
+      // Check if WiFi has been lost for too long
+      if (WIFI_LOSS_PROTECTION_ENABLED && wifiLostTime > 0 && 
+          (millis() - wifiLostTime > WIFI_LOSS_TIMEOUT) && 
+          !wifiLossProtectionTriggered) {
+        
+        Serial.println("🚨 WIFI LOSS PROTECTION TRIGGERED!");
+        Serial.println("🔒 WiFi lost for " + String(WIFI_LOSS_TIMEOUT/1000) + " seconds - STOPPING ENGINE FOR SECURITY");
+        
+        // Force stop engine for security
+        stopEngine();
+        wifiLossProtectionTriggered = true;
+        
+        // Send SMS alert if GSM is available
+        if (gsmHealthy) {
+          String alertMsg = "SECURITY ALERT: WiFi connection lost for " + String(WIFI_LOSS_TIMEOUT/1000) + 
+                           " seconds. Engine stopped for protection. Send '1234 START' to restart.";
+          sendSMS(alertMsg, AUTHORIZED_NUMBER_1);
+          delay(2000);
+          sendSMS(alertMsg, AUTHORIZED_NUMBER_2);
+        }
+        
+        // Enable GSM fallback for emergency control
         if (!useGSMFallback) {
-          Serial.println("WiFi failed, switching to GSM fallback");
+          Serial.println("📱 Enabling GSM fallback for emergency control");
           useGSMFallback = true;
           enableGPRS();
         }
       }
+      
+      // Enable GSM fallback after 30 seconds of WiFi loss
+      if (wifiLostTime > 0 && (millis() - wifiLostTime > 30000) && !useGSMFallback) {
+        Serial.println("WiFi lost for 30s, enabling GSM fallback");
+        useGSMFallback = true;
+        enableGPRS();
+      }
     }
-  } else {
-    // WiFi is connected, disable GSM fallback
-    if (useGSMFallback) {
-      Serial.println("WiFi restored, disabling GSM fallback");
-      useGSMFallback = false;
-    }
+    
+    lastWiFiCheck = millis();
   }
   
   // Update cached GSM status every 60s (non-blocking)
@@ -331,10 +401,10 @@ void loop() {
     lastGSMHealthCheck = millis();
   }
   
-  // Check for stored SMS messages every 5 seconds (more frequent for better responsiveness)
-  if (millis() - lastSMSCheck > 5000) {
-    Serial.println("🔍 Periodic SMS check...");
-    checkStoredSMS();
+  // Check for stored SMS messages every 10 seconds (enhanced parsing)
+  if (millis() - lastSMSCheck > 10000) {
+    Serial.println("🔍 Enhanced SMS check...");
+    checkStoredSMSEnhanced();
     lastSMSCheck = millis();
   }
   
@@ -349,12 +419,12 @@ void loop() {
     }
   }
   
-  // Update location every 10s (less frequent to save data)
-  if (millis() - lastUpdate > 10000 && gps.location.isValid()) {
+  // Update location every 15s (less frequent to save data, but with better validation)
+  if (millis() - lastUpdate > 15000 && gps.location.isValid()) {
     if (useGSMFallback) {
       sendLocationViaGSM();
     } else {
-      updateLocation();
+      updateLocationEnhanced();  // Use enhanced location function
     }
     checkGeofence();
     lastUpdate = millis();
@@ -377,25 +447,24 @@ void loop() {
   static bool lastVibrationState = false;
   static unsigned long lastVibrationTrigger = 0;
   
-  if (millis() - lastVibrationCheck > 10) { // Check every 10ms for ULTRA-FAST detection
+  if (millis() - lastVibrationCheck > 1000) { // Check every 1 second (reduced frequency)
     bool currentVibrationState = digitalRead(VIBRATION_PIN) == HIGH;
     
-    // Debug vibration sensor state changes for real-time monitoring
+    // Debug vibration sensor state changes (reduced spam)
     if (currentVibrationState != lastVibrationState) {
-      Serial.println("REAL-TIME Vibration: " + String(currentVibrationState ? "MOVEMENT DETECTED!" : "Movement stopped"));
-      Serial.println("   Engine: " + String(engineRunning ? "RUNNING" : "STOPPED") + 
-                     " | Armed: " + String(systemArmed ? "YES" : "NO"));
+      Serial.println("Vibration: " + String(currentVibrationState ? "DETECTED" : "STOPPED"));
+      Serial.println("Engine: " + String(engineRunning ? "ON" : "OFF") + " | Armed: " + String(systemArmed ? "YES" : "NO"));
     }
     
-    // IMMEDIATE ALERT on movement detection (real-time response)
+    // CONTROLLED ALERT on movement detection (prevent infinite buzzing)
     if (currentVibrationState && !lastVibrationState && systemArmed && !engineRunning) {
-      // IMMEDIATE response - minimum 100ms between alerts (ultra-fast detection)
-      if (millis() - lastVibrationTrigger > 100) {
-        Serial.println("🚨 REAL-TIME VIBRATION SENSOR TRIGGERED!");
-        handleImmediateTheftAlert();  // New function for immediate 10-buzz alert
+      // Minimum 30 seconds between alerts (prevent buzzer spam)
+      if (millis() - lastVibrationTrigger > 30000) {
+        Serial.println("🚨 VIBRATION ALERT TRIGGERED!");
+        handleAlert();  // Use standard alert function (not immediate)
         lastVibrationTrigger = millis();
       } else {
-        Serial.println("🔍 Vibration detected but debouncing active (100ms cooldown)");
+        Serial.println("🔍 Vibration detected but cooldown active (" + String((30000 - (millis() - lastVibrationTrigger))/1000) + "s remaining)");
       }
     }
     
@@ -520,9 +589,47 @@ void loop() {
       Serial.println("🔄 MANUALLY RESETTING GSM MODULE...");
       gsmHealthy = false;
       performGSMHealthCheck();
+    } else if (serialCommand == "WIFI STATUS") {
+      Serial.println("📶 WIFI PROTECTION STATUS:");
+      Serial.println("  WiFi Connected: " + String(WiFi.status() == WL_CONNECTED ? "YES" : "NO"));
+      Serial.println("  Protection Enabled: " + String(WIFI_LOSS_PROTECTION_ENABLED ? "YES" : "NO"));
+      Serial.println("  Protection Triggered: " + String(wifiLossProtectionTriggered ? "YES" : "NO"));
+      Serial.println("  Timeout Setting: " + String(WIFI_LOSS_TIMEOUT_SECONDS) + " seconds");
+      if (wifiLostTime > 0 && WiFi.status() != WL_CONNECTED) {
+        unsigned long lostDuration = (millis() - wifiLostTime) / 1000;
+        Serial.println("  WiFi Lost For: " + String(lostDuration) + " seconds");
+        Serial.println("  Time Until Auto-Stop: " + String(max(0L, (long)(WIFI_LOSS_TIMEOUT_SECONDS - lostDuration))) + " seconds");
+      }
     } else if (serialCommand == "TEST GSM") {
       Serial.println("🧪 TESTING GSM MODULE...");
       testSMSFunctionality();
+    } else if (serialCommand == "TEST LED") {
+      Serial.println("🔆 TESTING LED INDICATOR...");
+      Serial.println("LED OFF");
+      setLED(false);
+      delay(1000);
+      Serial.println("LED ON");
+      setLED(true);
+      delay(1000);
+      Serial.println("LED OFF");
+      setLED(false);
+      Serial.println("✅ LED test complete");
+    } else if (serialCommand == "TEST RELAYS") {
+      Serial.println("🔌 TESTING RELAY CONTROL...");
+      Serial.println("All relays OFF");
+      setIgnitionSwitchRelay(false);
+      setIgnitionCoilRelay(false);
+      delay(2000);
+      Serial.println("Ignition Switch Relay ON");
+      setIgnitionSwitchRelay(true);
+      delay(2000);
+      Serial.println("Ignition Coil Relay ON");
+      setIgnitionCoilRelay(true);
+      delay(2000);
+      Serial.println("All relays OFF");
+      setIgnitionSwitchRelay(false);
+      setIgnitionCoilRelay(false);
+      Serial.println("✅ Relay test complete");
     } else if (serialCommand == "READ SMS") {
       Serial.println("📱 MANUALLY READING SMS...");
       checkStoredSMS();
@@ -536,6 +643,38 @@ void loop() {
       String testSMS = "+CMT: \"+639675715673\",\"\",\"25/12/10,17:32:20+32\"\n1234 START";
       Serial.println("Test SMS: " + testSMS);
       handleSMS(testSMS);
+    } else if (serialCommand == "ENHANCED SMS CHECK") {
+      Serial.println("🧪 TESTING ENHANCED SMS CHECK...");
+      checkStoredSMSEnhanced();
+    } else if (serialCommand == "TEST HEX DECODE") {
+      Serial.println("🧪 TESTING HEX DECODE...");
+      String testHex = "31323334205354415254"; // "1234 START" in hex
+      String decoded = decodeHexSMS(testHex);
+      Serial.println("Hex: " + testHex + " -> Decoded: " + decoded);
+    } else if (serialCommand == "SYNC TIME") {
+      Serial.println("🕐 MANUAL TIME SYNC...");
+      syncTimeWithNTP();
+    } else if (serialCommand == "SHOW TIME") {
+      Serial.println("🕐 CURRENT TIME INFO:");
+      Serial.println("Unix timestamp: " + String(getCurrentUnixTime()));
+      Serial.println("Human readable: " + getCurrentTimestamp());
+      Serial.println("System millis: " + String(millis()));
+    } else if (serialCommand == "TEST GPS") {
+      Serial.println("🛰️ GPS TEST UPDATE...");
+      updateLocationEnhanced();
+    } else if (serialCommand == "DISABLE BUZZER") {
+      Serial.println("🔇 EMERGENCY: DISABLING BUZZER!");
+      noTone(BUZZER_PIN);
+      digitalWrite(BUZZER_PIN, LOW);
+      systemArmed = false; // Disarm system to stop alerts
+      Serial.println("✅ Buzzer disabled and system disarmed");
+    } else if (serialCommand == "EMERGENCY STOP") {
+      Serial.println("🚨 EMERGENCY STOP ACTIVATED!");
+      noTone(BUZZER_PIN);
+      digitalWrite(BUZZER_PIN, LOW);
+      systemArmed = false;
+      stopEngine();
+      Serial.println("✅ Emergency stop complete - all systems disabled");
     }
   }
   
@@ -555,29 +694,67 @@ void loop() {
   delay(10);  // Reduced from 100ms for better responsiveness
 }
 
+// ===== LED CONTROL HELPER FUNCTION =====
+void setLED(bool enable) {
+  // ESP32 built-in LED is always inverted: LOW=ON, HIGH=OFF
+  digitalWrite(LIGHT_INDICATOR_PIN, enable ? LOW : HIGH);
+  Serial.print("🔆 LED (GPIO 2): ");
+  Serial.print(enable ? "ON" : "OFF");
+  Serial.print(" (wrote ");
+  Serial.print(enable ? "LOW" : "HIGH");
+  Serial.println(" to GPIO)");
+  
+  // Verify the LED state
+  delay(10);
+  int readValue = digitalRead(LIGHT_INDICATOR_PIN);
+  Serial.println("🔍 GPIO 2 actual state: " + String(readValue == LOW ? "LOW" : "HIGH"));
+}
+
 // ===== RELAY CONTROL HELPER FUNCTIONS =====
 void setIgnitionSwitchRelay(bool enable) {
   if (IGNITION_SWITCH_INVERTED) {
     digitalWrite(IGNITION_SWITCH_RELAY_PIN, enable ? LOW : HIGH);
-    Serial.print("Ignition Switch Relay: ");
-    Serial.println(enable ? "ENABLED (NC logic)" : "DISABLED (NC logic)");
+    Serial.print("🔌 Ignition Switch Relay (GPIO 12): ");
+    Serial.print(enable ? "ENABLED" : "DISABLED");
+    Serial.print(" (NC logic - wrote ");
+    Serial.print(enable ? "LOW" : "HIGH");
+    Serial.println(")");
   } else {
     digitalWrite(IGNITION_SWITCH_RELAY_PIN, enable ? HIGH : LOW);
-    Serial.print("Ignition Switch Relay: ");
-    Serial.println(enable ? "ENABLED (NO logic)" : "DISABLED (NO logic)");
+    Serial.print("🔌 Ignition Switch Relay (GPIO 12): ");
+    Serial.print(enable ? "ENABLED" : "DISABLED");
+    Serial.print(" (NO logic - wrote ");
+    Serial.print(enable ? "HIGH" : "LOW");
+    Serial.println(")");
   }
+  
+  // Verify relay state
+  delay(10);
+  int actualState = digitalRead(IGNITION_SWITCH_RELAY_PIN);
+  Serial.println("🔍 GPIO 12 actual state: " + String(actualState == HIGH ? "HIGH" : "LOW"));
 }
 
 void setIgnitionCoilRelay(bool enable) {
   if (IGNITION_COIL_INVERTED) {
     digitalWrite(IGNITION_COIL_RELAY_PIN, enable ? LOW : HIGH);
-    Serial.print("Ignition Coil Relay: ");
-    Serial.println(enable ? "ENABLED (NC logic)" : "DISABLED (NC logic)");
+    Serial.print("🔌 Ignition Coil Relay (GPIO 13): ");
+    Serial.print(enable ? "ENABLED" : "DISABLED");
+    Serial.print(" (NC logic - wrote ");
+    Serial.print(enable ? "LOW" : "HIGH");
+    Serial.println(")");
   } else {
     digitalWrite(IGNITION_COIL_RELAY_PIN, enable ? HIGH : LOW);
-    Serial.print("Ignition Coil Relay: ");
-    Serial.println(enable ? "ENABLED (NO logic)" : "DISABLED (NO logic)");
+    Serial.print("🔌 Ignition Coil Relay (GPIO 13): ");
+    Serial.print(enable ? "ENABLED" : "DISABLED");
+    Serial.print(" (NO logic - wrote ");
+    Serial.print(enable ? "HIGH" : "LOW");
+    Serial.println(")");
   }
+  
+  // Verify relay state
+  delay(10);
+  int actualState = digitalRead(IGNITION_COIL_RELAY_PIN);
+  Serial.println("🔍 GPIO 13 actual state: " + String(actualState == HIGH ? "HIGH" : "LOW"));
 }
 
 // ===== GSM STATUS CACHE UPDATE (NON-BLOCKING) =====
@@ -646,6 +823,11 @@ void printSensorStatus() {
   Serial.print("  ├─ GSM Fallback: ");
   Serial.println(useGSMFallback ? "✓ Active" : "○ Standby");
   
+  Serial.print("  ├─ WiFi Protection: ");
+  Serial.println(WIFI_LOSS_PROTECTION_ENABLED ? "✓ Enabled" : "○ Disabled");
+  if (wifiLossProtectionTriggered) {
+    Serial.println("  ├─ Protection Status: ⚠️ TRIGGERED - Engine stopped for security");
+  }
   Serial.print("  └─ Uptime: ");
   unsigned long uptime = millis() / 1000;
   Serial.print(uptime / 3600);
@@ -842,6 +1024,10 @@ void connectWiFi() {
   }
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nWiFi OK");
+    
+    // Sync time with NTP servers when WiFi connects
+    Serial.println("Syncing time with NTP servers...");
+    syncTimeWithNTP();
   }
 }
 
@@ -886,16 +1072,27 @@ void updateLocation() {
     return;
   }
   
+  // Get current Unix timestamp (seconds since 1970)
+  unsigned long currentTime = getCurrentUnixTime();
+  
   FirebaseJson json;
   json.set("latitude", gps.location.lat());
   json.set("longitude", gps.location.lng());
   json.set("speed", gps.speed.kmph());
+  json.set("altitude", gps.altitude.meters());
   json.set("satellites", gps.satellites.value());
-  json.set("timestamp", millis());
-  json.set("valid", true);  // Add validity flag
+  json.set("hdop", gps.hdop.value());
+  json.set("timestamp", currentTime);  // Use Unix timestamp instead of millis()
+  json.set("timestampMs", millis());   // Keep millis for debugging
+  json.set("valid", true);
+  json.set("lastUpdate", getCurrentTimestamp());  // Human-readable timestamp
+  
+  Serial.println("📍 Sending GPS: Lat=" + String(gps.location.lat(), 6) + 
+                 ", Lng=" + String(gps.location.lng(), 6) + 
+                 ", Time=" + getCurrentTimestamp());
   
   if (Firebase.RTDB.setJSON(&fbdo, (String("/devices/") + DEVICE_ID + "/location").c_str(), &json)) {
-    Serial.println("✓ Location updated to Firebase");
+    Serial.println("✓ Location updated to Firebase with proper timestamp");
   } else {
     Serial.print("✗ Firebase location update failed: ");
     Serial.println(fbdo.errorReason());
@@ -905,12 +1102,20 @@ void updateLocation() {
 void updateStatus() {
   if (!Firebase.ready()) return;
   
+  // Get current Unix timestamp
+  unsigned long currentTime = getCurrentUnixTime();
+  
   FirebaseJson json;
   json.set("status", "online");
   json.set("engineRunning", engineRunning);
   json.set("systemArmed", systemArmed);
-  json.set("timestamp", millis());
+  json.set("timestamp", currentTime);  // Use Unix timestamp
+  json.set("timestampMs", millis());   // Keep millis for debugging
   json.set("uptime", millis() / 1000);
+  json.set("lastUpdate", getCurrentTimestamp());  // Human-readable timestamp
+  json.set("wifiConnected", WiFi.status() == WL_CONNECTED);
+  json.set("gpsValid", gps.location.isValid());
+  json.set("satellites", gps.satellites.value());
   
   Firebase.RTDB.setJSON(&fbdo, (String("/devices/") + DEVICE_ID + "/status").c_str(), &json);
 }
@@ -932,16 +1137,29 @@ void checkGeofence() {
   bool isInside = distance <= homeFence.radiusMeters;
   
   if (wasInsideFence && !isInside) {
-    sendNotification("Geofence Alert", "Vehicle left zone!");
-    sendSMS("ALERT: Vehicle left zone!");
+    sendNotification("Geofence Alert", "Vehicle left Home Zone!");
+    sendSMS("ALERT: Vehicle left Home Zone - " + String(distance, 0) + "m away!");
   }
   
   wasInsideFence = isInside;
   
   if (!Firebase.ready()) return;
+  
+  // Send enhanced geofence data with proper names and validation
   FirebaseJson json;
   json.set("distance", distance);
   json.set("inside", isInside);
+  json.set("fence", "Home Zone");  // Add fence name
+  json.set("name", "Home Zone");   // Alternative name field
+  json.set("radius", homeFence.radiusMeters);
+  json.set("centerLat", homeFence.centerLat);
+  json.set("centerLng", homeFence.centerLng);
+  json.set("timestamp", getCurrentUnixTime());
+  json.set("lastUpdate", getCurrentTimestamp());
+  
+  Serial.println("📍 Geofence: " + String(isInside ? "Inside" : "Outside") + 
+                 " Home Zone (" + String(distance, 0) + "m)");
+  
   Firebase.RTDB.setJSON(&fbdo, (String("/devices/") + DEVICE_ID + "/geofence").c_str(), &json);
 }
 
@@ -953,7 +1171,8 @@ void checkCommands() {
   
   // Add Firebase command cooldown to prevent spam and loops
   static unsigned long lastFirebaseCommand = 0;
-  if (millis() - lastFirebaseCommand < 2000) {
+  if (millis() - lastFirebaseCommand < 5000) {
+    Serial.println("🔒 Firebase command cooldown active (" + String((5000 - (millis() - lastFirebaseCommand))/1000) + "s remaining)");
     return; // Prevent Firebase command spam
   }
   
@@ -1047,7 +1266,7 @@ void startEngine() {
   starterStartTime = millis();
   lastStarterAttempt = millis();
   
-  digitalWrite(LIGHT_INDICATOR_PIN, HIGH);  // LED ON when engine running
+  setLED(true);  // LED ON when engine running
   engineRunning = true;
   
   // Save state to persistent storage
@@ -1062,8 +1281,11 @@ void startEngine() {
   updateStatus();
   sendNotification("Engine Control", "Starting engine...");
   
-  // REMOVED: Automatic SMS notifications to prevent spam
-  // User will get SMS response only when using SMS commands
+  // Send SMS notification for dashboard commands (with cooldown)
+  if (millis() - lastEngineStatusSMS > 60000) { // 1 minute cooldown
+    sendSMS("ENGINE STARTED via Dashboard - Anti-theft disabled", AUTHORIZED_NUMBER_1);
+    lastEngineStatusSMS = millis();
+  }
 }
 
 void stopEngine() {
@@ -1088,7 +1310,7 @@ void stopEngine() {
   setIgnitionCoilRelay(false);
   
   starterActive = false;
-  digitalWrite(LIGHT_INDICATOR_PIN, LOW);   // LED OFF when engine stopped
+  setLED(false);  // LED OFF when engine stopped
   engineRunning = false;
   
   // Reset starter attempt counter on successful stop
@@ -1107,8 +1329,11 @@ void stopEngine() {
   sendNotification("Engine Control", "Engine stopped");
   Serial.println("✓ Engine stopped - ANTI-THEFT ACTIVE");
   
-  // REMOVED: Automatic SMS notifications to prevent spam
-  // User will get SMS response only when using SMS commands
+  // Send SMS notification for dashboard commands (with cooldown)
+  if (millis() - lastEngineStatusSMS > 60000) { // 1 minute cooldown
+    sendSMS("ENGINE STOPPED via Dashboard - Anti-theft activated", AUTHORIZED_NUMBER_1);
+    lastEngineStatusSMS = millis();
+  }
 }
 
 // Check starter timeout in main loop
@@ -1163,12 +1388,13 @@ void handleAlert() {
   Serial.println("📊 Movement count: " + String(movementCount) + "/" + String(MOVEMENT_THRESHOLD) + 
                  " (within " + String(MOVEMENT_DETECTION_WINDOW/1000) + "s window)");
   
-  // Visual and audio alert (always trigger for immediate feedback)
-  digitalWrite(LIGHT_INDICATOR_PIN, HIGH);
-  tone(BUZZER_PIN, 1500, 200); // Shorter beep to reduce noise
-  delay(200);
-  digitalWrite(LIGHT_INDICATOR_PIN, LOW);
+  // Visual and audio alert (non-blocking)
+  setLED(true);
+  tone(BUZZER_PIN, 1500, 100); // Very short beep
+  delay(100);
+  setLED(false);
   noTone(BUZZER_PIN);
+  esp_task_wdt_reset(); // Reset watchdog after buzzer
   
   // Send SMS alert if threshold reached and not already sent
   if (movementCount >= MOVEMENT_THRESHOLD && !alertSent) {
@@ -1204,10 +1430,10 @@ void handleAlert() {
   }
 }
 
-// IMMEDIATE THEFT ALERT - Real-time response with 10 buzzes
+// CONTROLLED THEFT ALERT - Non-blocking buzzer with watchdog protection
 void handleImmediateTheftAlert() {
-  Serial.println("=== IMMEDIATE THEFT ALERT ===");
-  Serial.println("REAL-TIME MOVEMENT DETECTED!");
+  Serial.println("=== CONTROLLED THEFT ALERT ===");
+  Serial.println("Movement detected - executing controlled alert");
   Serial.println("Engine: " + String(engineRunning ? "RUNNING" : "STOPPED"));
   Serial.println("System: " + String(systemArmed ? "ARMED" : "DISARMED"));
   
@@ -1217,24 +1443,24 @@ void handleImmediateTheftAlert() {
     return;
   }
   
-  // IMMEDIATE 10-BUZZ ALERT (no delays, no SMS threshold)
-  Serial.println("TRIGGERING 10-BUZZ THEFT ALERT!");
+  // CONTROLLED 3-BUZZ ALERT (non-blocking with watchdog protection)
+  Serial.println("TRIGGERING CONTROLLED ALERT!");
   
-  for (int i = 1; i <= 10; i++) {
-    Serial.println("Buzz " + String(i) + "/10");
-    digitalWrite(LIGHT_INDICATOR_PIN, HIGH);
-    tone(BUZZER_PIN, 1800, 200);  // Higher pitch for urgency
-    delay(200);
-    digitalWrite(LIGHT_INDICATOR_PIN, LOW);
+  for (int i = 1; i <= 3; i++) {
+    Serial.println("Buzz " + String(i) + "/3");
+    setLED(true);
+    tone(BUZZER_PIN, 1500, 100);  // Shorter duration
+    delay(100);
+    setLED(false);
     noTone(BUZZER_PIN);
-    delay(100);  // Short gap between buzzes
+    delay(50);  // Very short gap
+    esp_task_wdt_reset(); // Reset watchdog during buzzing
   }
   
-  Serial.println("10-BUZZ ALERT COMPLETED!");
+  Serial.println("CONTROLLED ALERT COMPLETED!");
   
-  // IMMEDIATE SMS ALERT - No waiting, no thresholds
-  Serial.println("SENDING IMMEDIATE SMS ALERT!");
-  sendImmediateSMSAlert();
+  // Use standard alert system (with SMS cooldown)
+  handleAlert();
 }
 
 // IMMEDIATE SMS ALERT - Send SMS on ANY movement (no delays, no thresholds)
@@ -1371,6 +1597,7 @@ bool initializeGSM() {
   Serial.println("   • Send: '1234 STOP' to stop engine");  
   Serial.println("   • Send: '1234 LOCATE' for GPS location");
   Serial.println("   • Send: '1234 STATUS' for system status");
+  Serial.println("   • Send: '1234 RESET' to restart system");
   
   // Test SMS functionality
   delay(2000);
@@ -2295,6 +2522,9 @@ void processSMSCommand(String body, String sender) {
       statusMsg += engineRunning ? "ENGINE ON" : "ENGINE OFF";
       statusMsg += systemArmed ? " | ARMED" : " | DISARMED";
       statusMsg += " | WiFi: " + String(WiFi.status() == WL_CONNECTED ? "OK" : "FAIL");
+      if (wifiLossProtectionTriggered) {
+        statusMsg += " | WIFI-PROTECTION: ACTIVE";
+      }
       statusMsg += " | GPS: " + String(gps.satellites.value()) + " sats";
       sendSMS(statusMsg, sender);
       
@@ -2308,14 +2538,251 @@ void processSMSCommand(String body, String sender) {
       systemArmed = false;
       sendSMS("SYSTEM DISARMED - Anti-theft protection OFF", sender);
       
+    } else if (cmd == "RESET") {
+      Serial.println("🔄 SMS COMMAND: System reset requested...");
+      sendSMS("SYSTEM RESET - Restarting in 3 seconds...", sender);
+      delay(3000);
+      ESP.restart();
+      
     } else {
       Serial.println("❌ Unknown command: " + cmd);
-      sendSMS("UNKNOWN COMMAND. Valid: START, STOP, LOCATE, STATUS, ARM, DISARM", sender);
+      sendSMS("UNKNOWN COMMAND. Valid: START, STOP, LOCATE, STATUS, ARM, DISARM, RESET", sender);
     }
     
   } else {
     Serial.println("❌ Invalid password in SMS: " + body);
     Serial.println("❌ Expected format: '" + String(SMS_PASSWORD) + " COMMAND'");
     sendSMS("INVALID PASSWORD. Format: " + String(SMS_PASSWORD) + " COMMAND", sender);
+  }
+}
+
+// ===== ENHANCED SMS PARSING FUNCTIONS =====
+
+// Decode hex-encoded SMS messages
+String decodeHexSMS(String hexString) {
+  String decoded = "";
+  hexString.toUpperCase();
+  
+  // Remove any spaces or non-hex characters
+  String cleanHex = "";
+  for (int i = 0; i < hexString.length(); i++) {
+    char c = hexString.charAt(i);
+    if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
+      cleanHex += c;
+    }
+  }
+  
+  // Convert hex pairs to ASCII characters
+  for (int i = 0; i < cleanHex.length(); i += 2) {
+    if (i + 1 < cleanHex.length()) {
+      String hexPair = cleanHex.substring(i, i + 2);
+      char c = (char)strtol(hexPair.c_str(), NULL, 16);
+      if (c >= 32 && c <= 126) { // Printable ASCII only
+        decoded += c;
+      }
+    }
+  }
+  
+  return decoded;
+}
+
+// Simple SMS parser for your GSM module format
+void parseSimpleSMS(String response) {
+  Serial.println("🔍 SIMPLE SMS PARSER: " + response);
+  
+  // Look for hex-encoded message bodies in CMGR responses
+  int cmgrPos = response.indexOf("+CMGR:");
+  if (cmgrPos != -1) {
+    // Find the message body (usually on the next line after +CMGR header)
+    int lineEnd = response.indexOf("\n", cmgrPos);
+    if (lineEnd != -1) {
+      int bodyStart = lineEnd + 1;
+      int bodyEnd = response.indexOf("OK", bodyStart);
+      if (bodyEnd == -1) bodyEnd = response.length();
+      
+      String messageBody = response.substring(bodyStart, bodyEnd);
+      messageBody.trim();
+      messageBody.replace("\r", "");
+      messageBody.replace("\n", "");
+      
+      Serial.println("📱 Raw message body: '" + messageBody + "'");
+      
+      // Check if it looks like hex (long string of hex characters)
+      if (messageBody.length() > 20) {
+        String decoded = decodeHexSMS(messageBody);
+        Serial.println("📱 Decoded message: '" + decoded + "'");
+        
+        // Check if decoded message contains our commands
+        if (decoded.indexOf("1234") != -1) {
+          Serial.println("✅ Found 1234 command in decoded message!");
+          processSMSCommand(decoded, AUTHORIZED_NUMBER_1);
+          return;
+        }
+      }
+      
+      // If not hex, try processing as plain text
+      if (messageBody.indexOf("1234") != -1) {
+        Serial.println("✅ Found 1234 command in plain text!");
+        processSMSCommand(messageBody, AUTHORIZED_NUMBER_1);
+      }
+    }
+  }
+}
+
+// Enhanced checkStoredSMS with better parsing
+void checkStoredSMSEnhanced() {
+  Serial.println("📱 ENHANCED SMS CHECK...");
+  
+  // Reset watchdog
+  esp_task_wdt_reset();
+  
+  // Clear buffer
+  while (gsmSerial.available()) {
+    gsmSerial.read();
+  }
+  
+  // Try reading SMS by index (more reliable)
+  for (int i = 1; i <= 10; i++) {
+    Serial.println("📱 Checking SMS index " + String(i));
+    gsmSerial.println("AT+CMGR=" + String(i));
+    delay(2000);
+    esp_task_wdt_reset();
+    
+    String response = "";
+    unsigned long startTime = millis();
+    while (gsmSerial.available() && (millis() - startTime < 3000)) {
+      response += (char)gsmSerial.read();
+      delay(10);
+    }
+    
+    if (response.indexOf("+CMGR:") != -1) {
+      Serial.println("📨 Found SMS at index " + String(i));
+      Serial.println("📨 Response: " + response);
+      
+      // Use simple parser
+      parseSimpleSMS(response);
+      
+      // Delete this message
+      gsmSerial.println("AT+CMGD=" + String(i));
+      delay(1000);
+      esp_task_wdt_reset();
+    }
+  }
+}
+// ===== TIME SYNCHRONIZATION FUNCTIONS =====
+
+// Sync time with NTP servers
+void syncTimeWithNTP() {
+  Serial.println("🕐 Configuring NTP time synchronization...");
+  
+  // Configure NTP with multiple servers for reliability
+  configTime(8 * 3600, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");  // UTC+8 for Philippines
+  
+  // Wait for time synchronization
+  Serial.print("🕐 Waiting for NTP sync");
+  int attempts = 0;
+  while (time(nullptr) < 1000000000L && attempts < 20) {  // Wait until we get a reasonable timestamp
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  
+  if (time(nullptr) > 1000000000L) {
+    Serial.println("\n✅ NTP time synchronized successfully!");
+    Serial.println("🕐 Current time: " + getCurrentTimestamp());
+  } else {
+    Serial.println("\n⚠️ NTP sync failed, using system time");
+  }
+}
+
+// Get current Unix timestamp (seconds since 1970)
+unsigned long getCurrentUnixTime() {
+  time_t now = time(nullptr);
+  if (now > 1000000000L) {  // Valid timestamp
+    return (unsigned long)now;
+  } else {
+    // Fallback: estimate based on millis() + a base time (2025)
+    // This is approximate but better than 1970
+    unsigned long base2025 = 1735689600;  // Jan 1, 2025 00:00:00 UTC
+    return base2025 + (millis() / 1000);
+  }
+}
+
+// Get human-readable timestamp
+String getCurrentTimestamp() {
+  time_t now = time(nullptr);
+  if (now > 1000000000L) {  // Valid timestamp
+    struct tm* timeinfo = localtime(&now);
+    char buffer[64];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+    return String(buffer);
+  } else {
+    // Fallback format
+    unsigned long seconds = millis() / 1000;
+    unsigned long minutes = seconds / 60;
+    unsigned long hours = minutes / 60;
+    unsigned long days = hours / 24;
+    
+    return "2025-01-" + String(1 + (days % 31)) + " " + 
+           String((hours % 24), DEC) + ":" + 
+           String((minutes % 60), DEC) + ":" + 
+           String((seconds % 60), DEC);
+  }
+}
+
+// Enhanced location update with better GPS validation
+void updateLocationEnhanced() {
+  if (!Firebase.ready()) return;
+  
+  // Enhanced GPS validation
+  if (!gps.location.isValid() || gps.location.age() > 10000) {
+    Serial.println("⚠️ GPS data invalid or too old, skipping update");
+    return;
+  }
+  
+  // Validate GPS coordinates (basic sanity check)
+  double lat = gps.location.lat();
+  double lng = gps.location.lng();
+  
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    Serial.println("⚠️ GPS coordinates out of range, skipping update");
+    return;
+  }
+  
+  // Get current time
+  unsigned long currentTime = getCurrentUnixTime();
+  
+  FirebaseJson json;
+  json.set("latitude", lat);
+  json.set("longitude", lng);
+  json.set("speed", gps.speed.kmph());
+  json.set("altitude", gps.altitude.meters());
+  json.set("satellites", gps.satellites.value());
+  json.set("hdop", gps.hdop.value());
+  json.set("course", gps.course.deg());
+  json.set("timestamp", currentTime);
+  json.set("timestampMs", millis());
+  json.set("valid", true);
+  json.set("lastUpdate", getCurrentTimestamp());
+  json.set("age", gps.location.age());  // Age of GPS data in milliseconds
+  
+  // Add GPS quality indicators
+  String quality = "Unknown";
+  if (gps.satellites.value() >= 8) quality = "Excellent";
+  else if (gps.satellites.value() >= 6) quality = "Good";
+  else if (gps.satellites.value() >= 4) quality = "Fair";
+  else quality = "Poor";
+  
+  json.set("quality", quality);
+  
+  Serial.println("📍 Enhanced GPS Update:");
+  Serial.println("   Lat: " + String(lat, 6) + ", Lng: " + String(lng, 6));
+  Serial.println("   Satellites: " + String(gps.satellites.value()) + " (" + quality + ")");
+  Serial.println("   Time: " + getCurrentTimestamp());
+  
+  if (Firebase.RTDB.setJSON(&fbdo, (String("/devices/") + DEVICE_ID + "/location").c_str(), &json)) {
+    Serial.println("✅ Enhanced location updated successfully");
+  } else {
+    Serial.println("❌ Location update failed: " + fbdo.errorReason());
   }
 }
