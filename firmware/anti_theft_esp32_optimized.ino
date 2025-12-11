@@ -153,9 +153,8 @@ void setup() {
   
   // Print reboot reason for debugging
   Serial.println("\n==================================================");
-  Serial.println("🔄 ESP32 REBOOT DETECTED");
-  Serial.println("Reboot reason: " + String(esp_reset_reason()));
-  Serial.println("==================================================");
+  Serial.println("ESP32 REBOOT");
+  Serial.println("Reason: " + String(esp_reset_reason()));
   
   // Initialize watchdog timer (CRITICAL SAFETY FEATURE)
   Serial.println("Initializing watchdog timer...");
@@ -185,11 +184,11 @@ void setup() {
   pinMode(LIGHT_INDICATOR_PIN, OUTPUT);
   
   // Initialize relays for ANTI-THEFT PROTECTION
-  Serial.println("🔒 Initializing ANTI-THEFT system...");
-  setIgnitionSwitchRelay(false);  // Ignition switch OFF
-  setIgnitionCoilRelay(false);    // Ignition coil OFF (CRITICAL - prevents physical starting)
+  Serial.println("Init ANTI-THEFT...");
+  setIgnitionSwitchRelay(false);
+  setIgnitionCoilRelay(false);
   digitalWrite(BUZZER_PIN, LOW);
-  setLED(false);  // LED OFF initially
+  setLED(false);
   
   // Restore engine state from persistent storage
   engineRunning = prefs.getBool("engineRun", false);
@@ -401,10 +400,10 @@ void loop() {
     lastGSMHealthCheck = millis();
   }
   
-  // Check for stored SMS messages every 10 seconds (enhanced parsing)
-  if (millis() - lastSMSCheck > 10000) {
-    Serial.println("🔍 Enhanced SMS check...");
-    checkStoredSMSEnhanced();
+  // Check for stored SMS messages every 15 seconds
+  if (millis() - lastSMSCheck > 15000) {
+    Serial.println("SMS check...");
+    checkStoredSMS();
     lastSMSCheck = millis();
   }
   
@@ -424,7 +423,7 @@ void loop() {
     if (useGSMFallback) {
       sendLocationViaGSM();
     } else {
-      updateLocationEnhanced();  // Use enhanced location function
+      updateLocation();  // Use standard location function
     }
     checkGeofence();
     lastUpdate = millis();
@@ -643,25 +642,12 @@ void loop() {
       String testSMS = "+CMT: \"+639675715673\",\"\",\"25/12/10,17:32:20+32\"\n1234 START";
       Serial.println("Test SMS: " + testSMS);
       handleSMS(testSMS);
-    } else if (serialCommand == "ENHANCED SMS CHECK") {
-      Serial.println("🧪 TESTING ENHANCED SMS CHECK...");
-      checkStoredSMSEnhanced();
-    } else if (serialCommand == "TEST HEX DECODE") {
-      Serial.println("🧪 TESTING HEX DECODE...");
-      String testHex = "31323334205354415254"; // "1234 START" in hex
-      String decoded = decodeHexSMS(testHex);
-      Serial.println("Hex: " + testHex + " -> Decoded: " + decoded);
+
     } else if (serialCommand == "SYNC TIME") {
-      Serial.println("🕐 MANUAL TIME SYNC...");
+      Serial.println("Time sync...");
       syncTimeWithNTP();
     } else if (serialCommand == "SHOW TIME") {
-      Serial.println("🕐 CURRENT TIME INFO:");
-      Serial.println("Unix timestamp: " + String(getCurrentUnixTime()));
-      Serial.println("Human readable: " + getCurrentTimestamp());
-      Serial.println("System millis: " + String(millis()));
-    } else if (serialCommand == "TEST GPS") {
-      Serial.println("🛰️ GPS TEST UPDATE...");
-      updateLocationEnhanced();
+      Serial.println("Time: " + getCurrentTimestamp());
     } else if (serialCommand == "DISABLE BUZZER") {
       Serial.println("🔇 EMERGENCY: DISABLING BUZZER!");
       noTone(BUZZER_PIN);
@@ -678,16 +664,10 @@ void loop() {
     }
   }
   
-  // Print sensor monitoring every 30 seconds (reduced spam)
-  if (millis() - lastMonitorPrint > MONITOR_INTERVAL) {
+    // Print sensor monitoring every 60 seconds (reduced spam and code size)
+  if (millis() - lastMonitorPrint > 60000) {
     printSensorStatus();
     lastMonitorPrint = millis();
-  }
-  
-  // GPS diagnostics every 30 seconds
-  if (millis() - lastGPSDiagnostic > GPS_DIAGNOSTIC_INTERVAL) {
-    printGPSDiagnostics();
-    lastGPSDiagnostic = millis();
   }
   
   // Small delay to prevent tight loop (non-blocking)
@@ -798,221 +778,21 @@ void updateGSMStatusCache() {
   }
 }
 
-// ===== SENSOR MONITORING FUNCTION =====
+// ===== COMPACT SENSOR MONITORING =====
 void printSensorStatus() {
-  Serial.println("\n╔════════════════════════════════════════╗");
-  Serial.println("║       SENSOR STATUS MONITOR            ║");
-  Serial.println("╚════════════════════════════════════════╝");
-  
-  // System Status
-  Serial.println("\n📡 SYSTEM:");
-  Serial.print("  ├─ WiFi: ");
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("✓ Connected (");
-    Serial.print(WiFi.localIP());
-    Serial.print(") RSSI: ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm");
-  } else {
-    Serial.println("✗ Disconnected");
-  }
-  
-  Serial.print("  ├─ Firebase: ");
-  Serial.println(Firebase.ready() ? "✓ Connected" : "✗ Disconnected");
-  
-  Serial.print("  ├─ GSM Fallback: ");
-  Serial.println(useGSMFallback ? "✓ Active" : "○ Standby");
-  
-  Serial.print("  ├─ WiFi Protection: ");
-  Serial.println(WIFI_LOSS_PROTECTION_ENABLED ? "✓ Enabled" : "○ Disabled");
-  if (wifiLossProtectionTriggered) {
-    Serial.println("  ├─ Protection Status: ⚠️ TRIGGERED - Engine stopped for security");
-  }
-  Serial.print("  └─ Uptime: ");
-  unsigned long uptime = millis() / 1000;
-  Serial.print(uptime / 3600);
-  Serial.print("h ");
-  Serial.print((uptime % 3600) / 60);
-  Serial.print("m ");
-  Serial.print(uptime % 60);
-  Serial.println("s");
-  
-  // GPS Status
-  Serial.println("\n🛰️ GPS:");
-  Serial.print("  ├─ Status: ");
-  if (gps.location.isValid()) {
-    Serial.println("✓ Fix Acquired");
-    Serial.print("  ├─ Latitude: ");
-    Serial.println(gps.location.lat(), 6);
-    Serial.print("  ├─ Longitude: ");
-    Serial.println(gps.location.lng(), 6);
-    Serial.print("  ├─ Speed: ");
-    Serial.print(gps.speed.kmph(), 1);
-    Serial.println(" km/h");
-    Serial.print("  ├─ Altitude: ");
-    Serial.print(gps.altitude.meters(), 1);
-    Serial.println(" m");
-    Serial.print("  ├─ Satellites: ");
-    Serial.println(gps.satellites.value());
-    Serial.print("  └─ HDOP: ");
-    Serial.println(gps.hdop.value());
-  } else {
-    Serial.println("✗ No Fix");
-    Serial.print("  ├─ Satellites: ");
-    Serial.println(gps.satellites.value());
-    Serial.print("  └─ Characters: ");
-    Serial.println(gps.charsProcessed());
-  }
-  
-  // GSM Status (using cached data - non-blocking)
-  Serial.println("\n📱 GSM:");
-  Serial.print("  ├─ Module: ");
-  Serial.println(cachedGSMStatus.moduleResponding ? "✓ Responding" : "✗ Not Responding");
-  
-  Serial.print("  ├─ Signal: ");
-  Serial.print(cachedGSMStatus.signalStrength);
-  Serial.print("/31 (");
-  if (cachedGSMStatus.signalStrength > 20) Serial.print("Excellent");
-  else if (cachedGSMStatus.signalStrength > 15) Serial.print("Good");
-  else if (cachedGSMStatus.signalStrength > 10) Serial.print("Fair");
-  else if (cachedGSMStatus.signalStrength > 5) Serial.print("Poor");
-  else Serial.print("Very Poor");
-  Serial.println(")");
-  
-  Serial.print("  └─ Network: ");
-  Serial.println(cachedGSMStatus.networkRegistered ? "✓ Registered" : "✗ Not Registered");
-  
-  // Engine Control
-  Serial.println("\n🚗 ENGINE:");
-  Serial.print("  ├─ Status: ");
-  Serial.println(engineRunning ? "✓ Running" : "○ Stopped");
-  Serial.print("  ├─ Ignition Switch Relay (GPIO ");
-  Serial.print(IGNITION_SWITCH_RELAY_PIN);
-  Serial.print("): ");
-  Serial.println(digitalRead(IGNITION_SWITCH_RELAY_PIN) ? "ON" : "OFF");
-  Serial.print("  └─ Ignition Coil Relay (GPIO ");
-  Serial.print(IGNITION_COIL_RELAY_PIN);
-  Serial.print("): ");
-  Serial.println(digitalRead(IGNITION_COIL_RELAY_PIN) ? "ON" : "OFF");
-  
-  // Security
-  Serial.println("\n🔒 SECURITY:");
-  Serial.print("  ├─ System: ");
-  Serial.println(systemArmed ? "✓ Armed" : "○ Disarmed");
-  Serial.print("  ├─ Vibration Sensor (GPIO ");
-  Serial.print(VIBRATION_PIN);
-  Serial.print("): ");
-  int vibration = digitalRead(VIBRATION_PIN);
-  Serial.println(vibration ? "⚠️ TRIGGERED" : "○ Normal");
-  Serial.print("  ├─ Buzzer (GPIO ");
-  Serial.print(BUZZER_PIN);
-  Serial.print("): ");
-  Serial.println(digitalRead(BUZZER_PIN) ? "ON" : "OFF");
-  Serial.print("  └─ LED (GPIO ");
-  Serial.print(LIGHT_INDICATOR_PIN);
-  Serial.print("): ");
-  Serial.println(digitalRead(LIGHT_INDICATOR_PIN) ? "ON" : "OFF");
-  
-  // Geofence
-  if (homeFence.enabled && gps.location.isValid()) {
-    Serial.println("\n📍 GEOFENCE:");
-    double distance = calculateDistance(
-      gps.location.lat(), gps.location.lng(),
-      homeFence.centerLat, homeFence.centerLng
-    );
-    Serial.print("  ├─ Status: ");
-    Serial.println(distance <= homeFence.radiusMeters ? "✓ Inside" : "⚠️ Outside");
-    Serial.print("  ├─ Distance: ");
-    Serial.print(distance, 0);
-    Serial.println(" m");
-    Serial.print("  └─ Radius: ");
-    Serial.print(homeFence.radiusMeters, 0);
-    Serial.println(" m");
-  }
-  
-  // Speed Monitoring
-  if (gps.speed.isValid()) {
-    Serial.println("\n⚡ SPEED:");
-    Serial.print("  ├─ Current: ");
-    Serial.print(gps.speed.kmph(), 1);
-    Serial.println(" km/h");
-    Serial.print("  ├─ Limit: ");
-    Serial.print(speedLimit, 0);
-    Serial.println(" km/h");
-    Serial.print("  └─ Status: ");
-    if (gps.speed.kmph() > speedLimit) {
-      Serial.println("⚠️ OVER LIMIT!");
-    } else {
-      Serial.println("✓ Normal");
-    }
-  }
-  
-  Serial.println("\n════════════════════════════════════════\n");
+  Serial.println("\n=== STATUS ===");
+  Serial.print("WiFi: ");
+  Serial.println(WiFi.status() == WL_CONNECTED ? "OK" : "FAIL");
+  Serial.print("GPS: ");
+  Serial.println(gps.location.isValid() ? "OK" : "NO FIX");
+  Serial.print("Engine: ");
+  Serial.println(engineRunning ? "ON" : "OFF");
+  Serial.print("Armed: ");
+  Serial.println(systemArmed ? "YES" : "NO");
+  Serial.println("==============");
 }
 
-// ===== GPS DIAGNOSTICS FUNCTION =====
-void printGPSDiagnostics() {
-  Serial.println("\n🛰️ GPS DIAGNOSTICS:");
-  Serial.print("  ├─ Characters processed: ");
-  Serial.println(gps.charsProcessed());
-  Serial.print("  ├─ Sentences with fix: ");
-  Serial.println(gps.sentencesWithFix());
-  Serial.print("  ├─ Failed checksum: ");
-  Serial.println(gps.failedChecksum());
-  Serial.print("  ├─ Passed checksum: ");
-  Serial.println(gps.passedChecksum());
-  
-  if (gps.location.isValid()) {
-    Serial.print("  ├─ Location: ");
-    Serial.print(gps.location.lat(), 6);
-    Serial.print(", ");
-    Serial.println(gps.location.lng(), 6);
-    Serial.print("  ├─ Age: ");
-    Serial.print(gps.location.age());
-    Serial.println(" ms");
-  } else {
-    Serial.println("  ├─ Location: INVALID");
-  }
-  
-  if (gps.date.isValid()) {
-    Serial.print("  ├─ Date: ");
-    Serial.print(gps.date.month());
-    Serial.print("/");
-    Serial.print(gps.date.day());
-    Serial.print("/");
-    Serial.println(gps.date.year());
-  }
-  
-  if (gps.time.isValid()) {
-    Serial.print("  ├─ Time: ");
-    Serial.print(gps.time.hour());
-    Serial.print(":");
-    Serial.print(gps.time.minute());
-    Serial.print(":");
-    Serial.println(gps.time.second());
-  }
-  
-  Serial.print("  ├─ Satellites: ");
-  Serial.println(gps.satellites.value());
-  Serial.print("  ├─ HDOP: ");
-  Serial.println(gps.hdop.value());
-  Serial.print("  └─ Speed: ");
-  Serial.print(gps.speed.kmph(), 1);
-  Serial.println(" km/h");
-  
-  // GPS Status Summary
-  if (gps.charsProcessed() < 10) {
-    Serial.println("  ⚠️ GPS MODULE NOT RESPONDING - Check wiring!");
-  } else if (gps.satellites.value() == 0) {
-    Serial.println("  ⚠️ NO SATELLITES - Move to window or outdoors");
-  } else if (gps.satellites.value() < 4) {
-    Serial.println("  ⚠️ INSUFFICIENT SATELLITES - Need 4+ for fix");
-  } else {
-    Serial.println("  ✓ GPS WORKING PROPERLY");
-  }
-  
-  Serial.println("════════════════════════════════════════");
-}
+
 
 void connectWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -1087,9 +867,7 @@ void updateLocation() {
   json.set("valid", true);
   json.set("lastUpdate", getCurrentTimestamp());  // Human-readable timestamp
   
-  Serial.println("📍 Sending GPS: Lat=" + String(gps.location.lat(), 6) + 
-                 ", Lng=" + String(gps.location.lng(), 6) + 
-                 ", Time=" + getCurrentTimestamp());
+  Serial.println("GPS update: " + String(gps.location.lat(), 4) + "," + String(gps.location.lng(), 4));
   
   if (Firebase.RTDB.setJSON(&fbdo, (String("/devices/") + DEVICE_ID + "/location").c_str(), &json)) {
     Serial.println("✓ Location updated to Firebase with proper timestamp");
@@ -1157,8 +935,7 @@ void checkGeofence() {
   json.set("timestamp", getCurrentUnixTime());
   json.set("lastUpdate", getCurrentTimestamp());
   
-  Serial.println("📍 Geofence: " + String(isInside ? "Inside" : "Outside") + 
-                 " Home Zone (" + String(distance, 0) + "m)");
+  Serial.println("Geofence: " + String(distance, 0) + "m");
   
   Firebase.RTDB.setJSON(&fbdo, (String("/devices/") + DEVICE_ID + "/geofence").c_str(), &json);
 }
@@ -2629,46 +2406,7 @@ void parseSimpleSMS(String response) {
   }
 }
 
-// Enhanced checkStoredSMS with better parsing
-void checkStoredSMSEnhanced() {
-  Serial.println("📱 ENHANCED SMS CHECK...");
-  
-  // Reset watchdog
-  esp_task_wdt_reset();
-  
-  // Clear buffer
-  while (gsmSerial.available()) {
-    gsmSerial.read();
-  }
-  
-  // Try reading SMS by index (more reliable)
-  for (int i = 1; i <= 10; i++) {
-    Serial.println("📱 Checking SMS index " + String(i));
-    gsmSerial.println("AT+CMGR=" + String(i));
-    delay(2000);
-    esp_task_wdt_reset();
-    
-    String response = "";
-    unsigned long startTime = millis();
-    while (gsmSerial.available() && (millis() - startTime < 3000)) {
-      response += (char)gsmSerial.read();
-      delay(10);
-    }
-    
-    if (response.indexOf("+CMGR:") != -1) {
-      Serial.println("📨 Found SMS at index " + String(i));
-      Serial.println("📨 Response: " + response);
-      
-      // Use simple parser
-      parseSimpleSMS(response);
-      
-      // Delete this message
-      gsmSerial.println("AT+CMGD=" + String(i));
-      delay(1000);
-      esp_task_wdt_reset();
-    }
-  }
-}
+
 // ===== TIME SYNCHRONIZATION FUNCTIONS =====
 
 // Sync time with NTP servers
@@ -2730,59 +2468,3 @@ String getCurrentTimestamp() {
   }
 }
 
-// Enhanced location update with better GPS validation
-void updateLocationEnhanced() {
-  if (!Firebase.ready()) return;
-  
-  // Enhanced GPS validation
-  if (!gps.location.isValid() || gps.location.age() > 10000) {
-    Serial.println("⚠️ GPS data invalid or too old, skipping update");
-    return;
-  }
-  
-  // Validate GPS coordinates (basic sanity check)
-  double lat = gps.location.lat();
-  double lng = gps.location.lng();
-  
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    Serial.println("⚠️ GPS coordinates out of range, skipping update");
-    return;
-  }
-  
-  // Get current time
-  unsigned long currentTime = getCurrentUnixTime();
-  
-  FirebaseJson json;
-  json.set("latitude", lat);
-  json.set("longitude", lng);
-  json.set("speed", gps.speed.kmph());
-  json.set("altitude", gps.altitude.meters());
-  json.set("satellites", gps.satellites.value());
-  json.set("hdop", gps.hdop.value());
-  json.set("course", gps.course.deg());
-  json.set("timestamp", currentTime);
-  json.set("timestampMs", millis());
-  json.set("valid", true);
-  json.set("lastUpdate", getCurrentTimestamp());
-  json.set("age", gps.location.age());  // Age of GPS data in milliseconds
-  
-  // Add GPS quality indicators
-  String quality = "Unknown";
-  if (gps.satellites.value() >= 8) quality = "Excellent";
-  else if (gps.satellites.value() >= 6) quality = "Good";
-  else if (gps.satellites.value() >= 4) quality = "Fair";
-  else quality = "Poor";
-  
-  json.set("quality", quality);
-  
-  Serial.println("📍 Enhanced GPS Update:");
-  Serial.println("   Lat: " + String(lat, 6) + ", Lng: " + String(lng, 6));
-  Serial.println("   Satellites: " + String(gps.satellites.value()) + " (" + quality + ")");
-  Serial.println("   Time: " + getCurrentTimestamp());
-  
-  if (Firebase.RTDB.setJSON(&fbdo, (String("/devices/") + DEVICE_ID + "/location").c_str(), &json)) {
-    Serial.println("✅ Enhanced location updated successfully");
-  } else {
-    Serial.println("❌ Location update failed: " + fbdo.errorReason());
-  }
-}
