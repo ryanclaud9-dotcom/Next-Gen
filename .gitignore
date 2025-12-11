@@ -7,6 +7,8 @@ dashboard/js/firebase-config.js
 
 # Keep template files for reference
 !firmware/config.h.secure_template
+!firmware/config.h.template
+!dashboard/js/firebase-config.js.template
 !firebase-config/firebase-config.js.template
 
 # IDE and Editor Files

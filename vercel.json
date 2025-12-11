@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "name": "esp32-anti-theft-dashboard",
+  "builds": [
+    {
+      "src": "dashboard/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/dashboard/$1"
+    },
+    {
+      "src": "/",
+      "dest": "/dashboard/index.html"
+    }
+  ],
+  "functions": {
+    "dashboard/**": {
+      "includeFiles": "dashboard/**"
+    }
+  },
+  "headers": [
+    {
+      "source": "/dashboard/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400"
+        }
+      ]
+    }
+  ]
+}
