@@ -54,6 +54,7 @@ tmp/
 build/
 dist/
 out/
+public/
 
 # Documentation Build Files
 docs/_build/
